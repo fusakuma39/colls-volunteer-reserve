@@ -71,9 +71,10 @@
             "個別1", "個別2", "専科", "その他"
         ];
 
+        // 朝の時間の名称を「登校～朝の会」に統一
         const TIMETABLE_PATTERNS = {
             "通常日課": {
-                "morning": { name: "朝学習/したく", start: "08:10", end: "08:45" },
+                "morning": { name: "登校～朝の会", start: "08:10", end: "08:45" },
                 "periods": [
                     { name: "1時間目", start: "08:45", end: "09:30" },
                     { name: "2時間目", start: "09:35", end: "10:20" },
@@ -95,7 +96,7 @@
                 ]
             },
             "短縮時程": [
-                { name: "朝の会", start: "08:10", end: "08:30" },
+                { name: "登校～朝の会", start: "08:10", end: "08:30" },
                 { name: "1時間目", start: "08:30", end: "09:15" },
                 { name: "2時間目", start: "09:20", end: "10:05" },
                 { name: "中休み", start: "10:05", end: "10:15" },
@@ -105,7 +106,7 @@
                 { name: "帰りの会", start: "12:40", end: "13:00" }
             ],
             "委員会・クラブ": [
-                { name: "朝学習", start: "08:10", end: "08:45" },
+                { name: "登校～朝の会", start: "08:10", end: "08:45" },
                 { name: "1時間目", start: "08:45", end: "09:30" },
                 { name: "2時間目", start: "09:35", end: "10:20" },
                 { name: "中休み", start: "10:20", end: "10:40" },
@@ -185,9 +186,20 @@
             const [passwordError, setPasswordError] = useState("");
             
             const [confirmStudentReg, setConfirmStudentReg] = useState(null);
+            const [confirmAbsent, setConfirmAbsent] = useState(null); // ボランティア欠席用モーダル
+            const [holidays, setHolidays] = useState({}); // 祝日データ
+            
             const studentFormRef = useRef(null);
 
             const theme = view === 'student' ? 'student' : 'teacher';
+
+            // 祝日データの取得
+            useEffect(() => {
+                fetch('https://holidays-jp.github.io/api/v1/date.json')
+                    .then(res => res.json())
+                    .then(data => setHolidays(data))
+                    .catch(e => console.error("祝日取得エラー", e));
+            }, []);
 
             // データの取得
             const fetchData = async () => {
@@ -197,21 +209,11 @@
                     const res = await fetch(`${API_URL}?mode=student`);
                     const json = await res.json();
                     setData(json);
+                    if (data.schedules.length > 0) showMsg("最新データに更新しました");
                 } catch (e) {
                     showMsg("データの取得に失敗しました。", "error");
                 }
                 setLoading(false);
-            };
-
-            const fetchDataInBackground = async () => {
-                if (!API_URL) return;
-                try {
-                    const res = await fetch(`${API_URL}?mode=student`);
-                    const json = await res.json();
-                    setData(json);
-                } catch (e) {
-                    console.error("Background sync failed", e);
-                }
             };
 
             // 初期読み込み
@@ -233,10 +235,25 @@
 
             const getDailyPeriods = (dateStr) => {
                 const manual = data.schedules.find(s => checkDateMatch(s[0], dateStr));
-                if (manual && manual[1] !== "通常日課") return TIMETABLE_PATTERNS[manual[1]];
-
                 const d = new Date(dateStr);
                 const day = d.getDay();
+                const isHoliday = holidays[dateStr] !== undefined;
+                
+                let patternName = manual ? manual[1] : null;
+                
+                if (!patternName) {
+                    // 土日祝は自動で「休み」
+                    if (day === 0 || day === 6 || isHoliday) {
+                        patternName = "休み";
+                    } else {
+                        patternName = "通常日課";
+                    }
+                }
+
+                if (patternName === "休み") return []; // 休みの場合は枠なし
+
+                if (patternName !== "通常日課") return TIMETABLE_PATTERNS[patternName] || [];
+
                 const base = TIMETABLE_PATTERNS["通常日課"];
                 let periods = [base.morning, ...base.periods];
                 if ([1, 2, 4].includes(day)) {
@@ -247,8 +264,18 @@
                 return periods;
             };
 
-            const activePeriods = useMemo(() => getDailyPeriods(selectedDate), [selectedDate, data.schedules]);
-            const activeStudents = useMemo(() => data.students.filter(s => checkDateMatch(s[2], selectedDate)), [selectedDate, data.students]);
+            const activePeriods = useMemo(() => getDailyPeriods(selectedDate), [selectedDate, data.schedules, holidays]);
+            
+            const activeStudents = useMemo(() => {
+                // その日に「ABSENT（欠席）」として登録された学生の名前リストを取得
+                const absentStudentNames = data.reservations
+                    .filter(r => checkDateMatch(r[0], selectedDate) && r[1] === 'ABSENT' && r[3] === 'ABSENT')
+                    .map(r => r[2]);
+
+                return data.students.filter(s => 
+                    checkDateMatch(s[2], selectedDate) && !absentStudentNames.includes(s[0])
+                );
+            }, [selectedDate, data.students, data.reservations]);
 
             const handlePost = async (payload) => {
                 if (!API_URL) {
@@ -256,39 +283,59 @@
                     return;
                 }
                 
+                // 楽観的UI更新（画面のパカパカを防ぐ）
                 const previousData = { ...data };
-                let newData = { 
-                    schedules: [...data.schedules], 
-                    students: [...data.students], 
-                    reservations: [...data.reservations] 
-                };
+                setData(prevData => {
+                    let newData = { 
+                        schedules: [...prevData.schedules], 
+                        students: [...prevData.students], 
+                        reservations: [...prevData.reservations] 
+                    };
 
-                if (payload.type === 'reg_student') {
-                    newData.students.push([payload.name, payload.email, payload.date, payload.start, payload.end]);
-                } else if (payload.type === 'reserve') {
-                    newData.reservations = newData.reservations.filter(r => !(checkDateMatch(r[0], payload.date) && r[1] === payload.periodName && r[2] === payload.studentName));
-                    newData.reservations.push([payload.date, payload.periodName, payload.studentName, payload.className, payload.note]);
-                } else if (payload.type === 'set_schedule') {
-                    const idx = newData.schedules.findIndex(s => checkDateMatch(s[0], payload.date));
-                    if (idx >= 0) {
-                        newData.schedules[idx] = [payload.date, payload.pattern];
-                    } else {
-                        newData.schedules.push([payload.date, payload.pattern]);
+                    if (payload.type === 'reg_student') {
+                        newData.students.push([payload.name, payload.email, payload.date, payload.start, payload.end]);
+                    } else if (payload.type === 'reserve') {
+                        // 上書き・削除のために同じ枠・同じ人の予約を消す
+                        newData.reservations = newData.reservations.filter(r => !(checkDateMatch(r[0], payload.date) && r[1] === payload.periodName && r[2] === payload.studentName));
+                        // 予約キャンセルでなければ追加
+                        if (payload.className !== 'CANCELLED') {
+                            newData.reservations.push([payload.date, payload.periodName, payload.studentName, payload.className, payload.note]);
+                        }
+                    } else if (payload.type === 'set_schedule') {
+                        const idx = newData.schedules.findIndex(s => checkDateMatch(s[0], payload.date));
+                        if (idx >= 0) {
+                            newData.schedules[idx] = [payload.date, payload.pattern];
+                        } else {
+                            newData.schedules.push([payload.date, payload.pattern]);
+                        }
                     }
+                    return newData;
+                });
+
+                setModal(null);
+                setConfirmAbsent(null);
+                
+                if (payload.className === 'CANCELLED') {
+                    showMsg("予約を取り消しました");
+                } else if (payload.className === 'ABSENT') {
+                    showMsg("ボランティアを欠席にしました");
+                } else {
+                    showMsg("送信しました！");
                 }
 
-                setData(newData);
-                setModal(null);
-                showMsg("送信しました！");
-
+                // 画面をズレさせないため、ここでは fetchDataInBackground() を呼ばない
                 try {
                     await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
-                    fetchDataInBackground();
                 } catch (e) {
                     setData(previousData);
-                    showMsg("通信エラーが発生しました。元に戻します。", "error");
+                    showMsg("通信エラーが発生しました。最新データに更新してください。", "error");
                 }
             };
+
+            const selectedDayOfWeek = new Date(selectedDate).getDay();
+            const dayOfWeekStrs = ['日', '月', '火', '水', '木', '金', '土'];
+            const isHol = holidays[selectedDate] !== undefined;
+            const dayColorClass = (selectedDayOfWeek === 0 || isHol) ? 'bg-red-100 text-red-600' : selectedDayOfWeek === 6 ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-700';
 
             return (
                 <div className="min-h-screen pb-12">
@@ -336,30 +383,35 @@
 
                     <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8 animate-fade-in">
                         
-                        <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center gap-6 justify-between relative overflow-hidden">
+                        <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center gap-6 justify-between relative overflow-hidden">
                             <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${view === 'student' ? 'bg-student-500' : 'bg-teacher-500'}`}></div>
                             <div className="pl-2">
                                 <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-1">Activity Date</h2>
                                 <div className="flex items-center gap-3">
                                     <Icon name="calendar-days" className="text-slate-400" size={24} />
-                                    <span className="text-2xl font-black text-slate-800">活動日を選択</span>
+                                    <span className="text-2xl font-black text-slate-800 flex items-center gap-3">
+                                        活動日を選択
+                                        <span className={`text-sm px-3 py-1 rounded-lg ${dayColorClass}`}>
+                                            {isHol ? holidays[selectedDate] : `${dayOfWeekStrs[selectedDayOfWeek]}曜日`}
+                                        </span>
+                                    </span>
                                 </div>
                             </div>
-                            <div className="w-full sm:w-auto flex items-center gap-3">
+                            <div className="w-full md:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                                 <input 
                                     type="date" 
                                     value={selectedDate} 
                                     onChange={(e) => setSelectedDate(e.target.value)} 
                                     className={`w-full sm:w-64 p-3 text-lg font-bold border-2 border-slate-200 rounded-xl outline-none transition focus:border-${theme}-500 focus:ring-4 focus:ring-${theme}-500/10 text-slate-700`}
                                 />
-                                {/* ★ 更新ボタンの追加 */}
+                                {/* 分かりやすい「データ更新ボタン」 */}
                                 <button 
                                     onClick={fetchData} 
                                     disabled={loading}
-                                    className={`p-3.5 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-${theme}-500 transition shadow-sm disabled:opacity-50 flex items-center justify-center`}
-                                    title="最新の情報に更新"
+                                    className={`w-full sm:w-auto px-6 py-3.5 rounded-xl border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition shadow-md disabled:opacity-50 flex items-center justify-center gap-2 font-bold`}
                                 >
-                                    <Icon name="refresh-cw" size={20} className={loading ? `animate-spin text-${theme}-500` : ""} />
+                                    <Icon name="refresh-cw" size={18} className={loading ? `animate-spin` : ""} />
+                                    <span>最新データに更新</span>
                                 </button>
                             </div>
                         </section>
@@ -434,7 +486,7 @@
                                     <div className="bg-slate-50 p-4 rounded-b-2xl shadow-inner border border-slate-200 flex-1 overflow-y-auto">
                                         <div className="space-y-3">
                                             {(() => {
-                                                const filtered = data.reservations.filter(r => checkDateMatch(r[0], selectedDate) && r[2].toString().includes(studentFilter));
+                                                const filtered = data.reservations.filter(r => checkDateMatch(r[0], selectedDate) && r[2].toString().includes(studentFilter) && r[3] !== 'CANCELLED' && r[3] !== 'ABSENT');
                                                 if (filtered.length === 0) {
                                                     return (
                                                         <div className="flex flex-col items-center justify-center h-48 text-slate-400 opacity-60">
@@ -475,15 +527,25 @@
                                                   <span className="relative inline-flex rounded-full h-2 w-2 bg-teacher-500"></span>
                                                 </span>
                                                 <span className="text-xs font-black text-teacher-700 uppercase">
-                                                    {data.schedules.find(s => checkDateMatch(s[0], selectedDate))?.[1] || "通常日課"}
+                                                    {(() => {
+                                                        const currentSetting = data.schedules.find(s => checkDateMatch(s[0], selectedDate));
+                                                        if (currentSetting) return currentSetting[1];
+                                                        const day = new Date(selectedDate).getDay();
+                                                        return (day === 0 || day === 6 || holidays[selectedDate]) ? "休み" : "通常日課";
+                                                    })()}
                                                 </span>
                                             </div>
                                         </div>
                                     </div>
                                     <div className="flex flex-wrap gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
-                                        {["通常日課", "短縮時程", "委員会・クラブ"].map(p => {
+                                        {/* 時程に「休み」を追加 */}
+                                        {["通常日課", "短縮時程", "委員会・クラブ", "休み"].map(p => {
                                             const currentSetting = data.schedules.find(s => checkDateMatch(s[0], selectedDate));
-                                            const current = currentSetting ? currentSetting[1] : "通常日課";
+                                            let current = currentSetting ? currentSetting[1] : "通常日課";
+                                            if (!currentSetting) {
+                                                const day = new Date(selectedDate).getDay();
+                                                if (day === 0 || day === 6 || holidays[selectedDate]) current = "休み";
+                                            }
                                             const isCurrent = (p === current);
                                             return (
                                                 <button 
@@ -513,11 +575,20 @@
                                                     <th className="p-4 text-left font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-40 shadow-[1px_1px_0_#e2e8f0]">
                                                         校時 / 時間
                                                     </th>
-                                                    {/* ★ 変更ポイント: min-w, max-w, w を150pxに固定して横幅の広がりを防ぐ */}
                                                     {activeStudents.length === 0 ? <th className="p-4 text-slate-400 font-normal sticky-top bg-slate-50 border-b border-slate-200 shadow-[0_1px_0_#e2e8f0]">該当する学生がいません</th> :
                                                         activeStudents.map((s, i) => (
                                                             <th key={i} className="p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
-                                                                <div className="flex items-center justify-center gap-1.5 mb-1 text-sm"><Icon name="user" size={14} className="text-slate-400"/> {s[0]}</div>
+                                                                <div className="flex items-center justify-center gap-1.5 mb-1 text-sm group/name relative">
+                                                                    <Icon name="user" size={14} className="text-slate-400"/> {s[0]}
+                                                                    {/* 欠席（削除）ボタン */}
+                                                                    <button 
+                                                                        onClick={() => setConfirmAbsent(s[0])} 
+                                                                        className="absolute right-0 text-slate-300 hover:text-red-500 transition-colors p-1"
+                                                                        title="このボランティアを欠席にする"
+                                                                    >
+                                                                        <Icon name="user-minus" size={14} />
+                                                                    </button>
+                                                                </div>
                                                                 <div className="inline-block px-2 py-0.5 bg-white rounded text-[10px] text-slate-500 border border-slate-200 font-mono">
                                                                     {displayTime(s[3])}~{displayTime(s[4])}
                                                                 </div>
@@ -538,14 +609,12 @@
                                                         </td>
                                                         {activeStudents.map((s, sIdx) => {
                                                             const isAvailable = isPeriodAvailable({ start: s[3], end: s[4] }, p);
-                                                            const reservation = data.reservations.find(r => checkDateMatch(r[0], selectedDate) && r[1] === p.name && r[2] === s[0]);
+                                                            const reservation = data.reservations.find(r => checkDateMatch(r[0], selectedDate) && r[1] === p.name && r[2] === s[0] && r[3] !== 'CANCELLED');
                                                             return (
-                                                                // ★ 変更ポイント: tdにも幅固定を適用
                                                                 <td key={sIdx} className="p-2.5 text-center border-b border-r border-slate-100 last:border-r-0 min-w-[150px] max-w-[150px] w-[150px]">
                                                                     {!isAvailable ? 
                                                                         <div className="bg-slate-50 text-slate-300 text-[10px] py-3 rounded-lg flex justify-center items-center h-full"><Icon name="minus" size={16}/></div> 
                                                                     : reservation ? (
-                                                                        // ★ 変更ポイント: overflow-hiddenを追加し、中のテキストをtruncateで省略
                                                                         <button onClick={() => setModal({ type: 'reserve', student: s[0], period: p.name, data: reservation })} className="w-full py-2.5 px-2 bg-teacher-600 text-white rounded-lg text-xs font-bold shadow-md shadow-teacher-500/20 hover:bg-teacher-700 hover:shadow-lg transition-all flex flex-col items-center gap-1 group/btn overflow-hidden">
                                                                             <span className="w-full truncate">{reservation[3]}</span>
                                                                             <span className="text-[9px] font-normal opacity-70 truncate w-full group-hover/btn:opacity-100 block">{reservation[4] || "詳細"}</span>
@@ -567,6 +636,31 @@
                             </div>
                         )}
                     </main>
+
+                    {/* 学生の欠席・削除確認モーダル */}
+                    {confirmAbsent && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setConfirmAbsent(null)}></div>
+                            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
+                                <div className="p-6 bg-red-500 text-white flex justify-between items-start">
+                                    <h3 className="text-xl font-bold flex items-center gap-2"><Icon name="user-minus" /> ボランティアの欠席</h3>
+                                </div>
+                                <div className="p-6 space-y-5">
+                                    <p className="font-bold text-slate-800 text-center text-lg">{confirmAbsent} 様</p>
+                                    <p className="text-sm text-slate-600 font-medium text-center leading-relaxed">
+                                        この方を本日のリストから削除（欠席）にしますか？<br/>
+                                        <span className="text-xs text-red-500 font-bold mt-1 block">※すでに入っている予約枠も削除されます。</span>
+                                    </p>
+                                    <div className="flex gap-3 pt-2">
+                                        <button type="button" onClick={() => setConfirmAbsent(null)} className="flex-1 py-3.5 font-bold text-slate-500 bg-slate-100 rounded-xl hover:bg-slate-200 transition">キャンセル</button>
+                                        <button type="button" onClick={() => {
+                                            handlePost({ type: 'reserve', date: selectedDate, periodName: 'ABSENT', studentName: confirmAbsent, className: 'ABSENT', note: '' });
+                                        }} className="flex-1 bg-red-500 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-red-500/30 hover:bg-red-600 hover:-translate-y-0.5 transition-all">欠席にする</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* 学生登録の確認モーダル */}
                     {confirmStudentReg && (
@@ -658,22 +752,38 @@
                                     e.preventDefault();
                                     const fd = new FormData(e.target);
                                     handlePost({ type: 'reserve', date: selectedDate, periodName: modal.period, studentName: modal.student, className: fd.get('class'), note: fd.get('note') });
-                                }} className="p-6 space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="users" size={14}/> 担当クラス <span className="text-red-500">*</span></label>
-                                        <select name="class" defaultValue={modal.data?.[3] || ""} required className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition font-bold text-slate-700">
-                                            <option value="" disabled>選択してください</option>
-                                            {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                                        </select>
+                                }} className="p-6">
+                                    <div className="space-y-6">
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="users" size={14}/> 担当クラス <span className="text-red-500">*</span></label>
+                                            <select name="class" defaultValue={modal.data?.[3] || ""} required className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition font-bold text-slate-700">
+                                                <option value="" disabled>選択してください</option>
+                                                {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="pencil-line" size={14}/> 備考（授業名など）</label>
+                                            <textarea name="note" defaultValue={modal.data?.[4] || ""} rows="3" className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition resize-none" placeholder="例：算数の丸付け補助をお願いします" />
+                                        </div>
+                                        <div className="flex gap-3 pt-2">
+                                            <button type="button" onClick={() => setModal(null)} className="flex-1 py-3.5 font-bold text-slate-500 bg-slate-100 rounded-xl hover:bg-slate-200 transition">キャンセル</button>
+                                            <button type="submit" className="flex-1 bg-teacher-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-teacher-500/30 hover:bg-teacher-700 hover:-translate-y-0.5 transition-all">予約を確定</button>
+                                        </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="pencil-line" size={14}/> 備考（授業名など）</label>
-                                        <textarea name="note" defaultValue={modal.data?.[4] || ""} rows="3" className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition resize-none" placeholder="例：算数の丸付け補助をお願いします" />
-                                    </div>
-                                    <div className="flex gap-3 pt-2">
-                                        <button type="button" onClick={() => setModal(null)} className="flex-1 py-3.5 font-bold text-slate-500 bg-slate-100 rounded-xl hover:bg-slate-200 transition">キャンセル</button>
-                                        <button type="submit" className="flex-1 bg-teacher-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-teacher-500/30 hover:bg-teacher-700 hover:-translate-y-0.5 transition-all">予約を確定</button>
-                                    </div>
+                                    {/* ★ 予約キャンセルのボタン（すでにデータがある場合のみ表示） */}
+                                    {modal.data && (
+                                        <div className="mt-4 pt-4 border-t border-slate-200">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => {
+                                                    handlePost({ type: 'reserve', date: selectedDate, periodName: modal.period, studentName: modal.student, className: 'CANCELLED', note: '' });
+                                                }} 
+                                                className="w-full py-3 text-red-500 text-sm font-bold rounded-xl hover:bg-red-50 border border-red-100 transition-colors flex justify-center items-center gap-2"
+                                            >
+                                                <Icon name="trash-2" size={16} /> この予約を取り消す
+                                            </button>
+                                        </div>
+                                    )}
                                 </form>
                             </div>
                         </div>
