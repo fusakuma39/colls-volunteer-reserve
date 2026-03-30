@@ -66,8 +66,8 @@
         // ==========================================
 
         const CLASSES = [
-            "1-1", "1-2", "2-1", "2-2", "3-1", "3-2",
-            "4-1", "4-2", "5-1", "5-2", "6-1", "6-2",
+            "1年1組", "1年2組", "2年1組", "2年2組", "3年1組", "3年2組",
+            "4年1組", "4年2組", "5年1組", "5年2組", "6年1組", "6年2組",
             "個別1", "個別2", "専科", "その他"
         ];
 
@@ -128,7 +128,7 @@
             return <span ref={elRef} className="inline-flex items-center justify-center" />;
         };
 
-        // --- ユーティリティ関数（スプレッドシートのUTC/JST解釈ズレを吸収する） ---
+        // --- ユーティリティ関数 ---
         const checkDateMatch = (sheetDate, targetDateStr) => {
             if (!sheetDate) return false;
             const str = String(sheetDate);
@@ -183,10 +183,13 @@
             
             const [passwordModal, setPasswordModal] = useState(false);
             const [passwordError, setPasswordError] = useState("");
+            
+            const [confirmStudentReg, setConfirmStudentReg] = useState(null);
+            const studentFormRef = useRef(null);
 
             const theme = view === 'student' ? 'student' : 'teacher';
 
-            // 初回読み込み
+            // データの取得
             const fetchData = async () => {
                 if (!API_URL) return;
                 setLoading(true);
@@ -200,7 +203,6 @@
                 setLoading(false);
             };
 
-            // バックグラウンド同期用
             const fetchDataInBackground = async () => {
                 if (!API_URL) return;
                 try {
@@ -212,7 +214,7 @@
                 }
             };
 
-            // 依存配列を空にして、最初の1回だけ読み込む
+            // 初期読み込み
             useEffect(() => { fetchData(); }, []);
 
             const showMsg = (text, type = "success") => {
@@ -254,21 +256,16 @@
                     return;
                 }
                 
-                // --- 楽観的UI更新（画面を一瞬で切り替える） ---
                 const previousData = { ...data };
                 let newData = { 
                     schedules: [...data.schedules], 
-                    students: [...data.schedules], 
+                    students: [...data.students], 
                     reservations: [...data.reservations] 
                 };
-                
-                // data.studentsのディープコピーの修正
-                newData.students = [...data.students];
 
                 if (payload.type === 'reg_student') {
                     newData.students.push([payload.name, payload.email, payload.date, payload.start, payload.end]);
                 } else if (payload.type === 'reserve') {
-                    // 同一の予約があれば上書きのため削除
                     newData.reservations = newData.reservations.filter(r => !(checkDateMatch(r[0], payload.date) && r[1] === payload.periodName && r[2] === payload.studentName));
                     newData.reservations.push([payload.date, payload.periodName, payload.studentName, payload.className, payload.note]);
                 } else if (payload.type === 'set_schedule') {
@@ -282,15 +279,12 @@
 
                 setData(newData);
                 setModal(null);
-                showMsg("保存しました！");
+                showMsg("送信しました！");
 
-                // バックグラウンドでGASへ送信
                 try {
                     await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
-                    // 送信完了後、念のため最新状態を同期
                     fetchDataInBackground();
                 } catch (e) {
-                    // 失敗した場合は元の状態に戻す
                     setData(previousData);
                     showMsg("通信エラーが発生しました。元に戻します。", "error");
                 }
@@ -351,13 +345,22 @@
                                     <span className="text-2xl font-black text-slate-800">活動日を選択</span>
                                 </div>
                             </div>
-                            <div className="w-full sm:w-auto">
+                            <div className="w-full sm:w-auto flex items-center gap-3">
                                 <input 
                                     type="date" 
                                     value={selectedDate} 
                                     onChange={(e) => setSelectedDate(e.target.value)} 
                                     className={`w-full sm:w-64 p-3 text-lg font-bold border-2 border-slate-200 rounded-xl outline-none transition focus:border-${theme}-500 focus:ring-4 focus:ring-${theme}-500/10 text-slate-700`}
                                 />
+                                {/* ★ 更新ボタンの追加 */}
+                                <button 
+                                    onClick={fetchData} 
+                                    disabled={loading}
+                                    className={`p-3.5 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-${theme}-500 transition shadow-sm disabled:opacity-50 flex items-center justify-center`}
+                                    title="最新の情報に更新"
+                                >
+                                    <Icon name="refresh-cw" size={20} className={loading ? `animate-spin text-${theme}-500` : ""} />
+                                </button>
                             </div>
                         </section>
 
@@ -368,11 +371,17 @@
                                         <div className="bg-student-100 p-2 rounded-full text-student-600"><Icon name="clock" size={24} /></div>
                                         <h2 className="text-xl font-bold text-slate-800">勤務可能時間を登録</h2>
                                     </div>
-                                    <form onSubmit={(e) => {
+                                    <form ref={studentFormRef} onSubmit={(e) => {
                                         e.preventDefault();
                                         const fd = new FormData(e.target);
-                                        handlePost({ type: 'reg_student', name: fd.get('name'), email: "", date: selectedDate, start: fd.get('start'), end: fd.get('end') });
-                                        e.target.reset();
+                                        setConfirmStudentReg({
+                                            type: 'reg_student',
+                                            name: fd.get('name'),
+                                            email: "",
+                                            date: selectedDate,
+                                            start: fd.get('start'),
+                                            end: fd.get('end')
+                                        });
                                     }} className="space-y-6">
                                         
                                         <div className="space-y-2">
@@ -395,8 +404,8 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <button disabled={loading} className="w-full bg-student-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-student-500/30 hover:bg-student-600 hover:shadow-xl hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0">
-                                            登録する
+                                        <button className="w-full bg-student-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-student-500/30 hover:bg-student-600 hover:shadow-xl hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0">
+                                            確認画面へ
                                         </button>
                                     </form>
                                 </section>
@@ -504,9 +513,10 @@
                                                     <th className="p-4 text-left font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-40 shadow-[1px_1px_0_#e2e8f0]">
                                                         校時 / 時間
                                                     </th>
+                                                    {/* ★ 変更ポイント: min-w, max-w, w を150pxに固定して横幅の広がりを防ぐ */}
                                                     {activeStudents.length === 0 ? <th className="p-4 text-slate-400 font-normal sticky-top bg-slate-50 border-b border-slate-200 shadow-[0_1px_0_#e2e8f0]">該当する学生がいません</th> :
                                                         activeStudents.map((s, i) => (
-                                                            <th key={i} className="p-3 text-center min-w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
+                                                            <th key={i} className="p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
                                                                 <div className="flex items-center justify-center gap-1.5 mb-1 text-sm"><Icon name="user" size={14} className="text-slate-400"/> {s[0]}</div>
                                                                 <div className="inline-block px-2 py-0.5 bg-white rounded text-[10px] text-slate-500 border border-slate-200 font-mono">
                                                                     {displayTime(s[3])}~{displayTime(s[4])}
@@ -530,13 +540,15 @@
                                                             const isAvailable = isPeriodAvailable({ start: s[3], end: s[4] }, p);
                                                             const reservation = data.reservations.find(r => checkDateMatch(r[0], selectedDate) && r[1] === p.name && r[2] === s[0]);
                                                             return (
-                                                                <td key={sIdx} className="p-2.5 text-center border-b border-r border-slate-100 last:border-r-0">
+                                                                // ★ 変更ポイント: tdにも幅固定を適用
+                                                                <td key={sIdx} className="p-2.5 text-center border-b border-r border-slate-100 last:border-r-0 min-w-[150px] max-w-[150px] w-[150px]">
                                                                     {!isAvailable ? 
                                                                         <div className="bg-slate-50 text-slate-300 text-[10px] py-3 rounded-lg flex justify-center items-center h-full"><Icon name="minus" size={16}/></div> 
                                                                     : reservation ? (
-                                                                        <button onClick={() => setModal({ type: 'reserve', student: s[0], period: p.name, data: reservation })} className="w-full py-2.5 px-2 bg-teacher-600 text-white rounded-lg text-xs font-bold shadow-md shadow-teacher-500/20 hover:bg-teacher-700 hover:shadow-lg transition-all flex flex-col items-center gap-1 group/btn">
-                                                                            <span>{reservation[3]}</span>
-                                                                            <span className="text-[9px] font-normal opacity-70 truncate w-full group-hover/btn:opacity-100">{reservation[4] || "詳細"}</span>
+                                                                        // ★ 変更ポイント: overflow-hiddenを追加し、中のテキストをtruncateで省略
+                                                                        <button onClick={() => setModal({ type: 'reserve', student: s[0], period: p.name, data: reservation })} className="w-full py-2.5 px-2 bg-teacher-600 text-white rounded-lg text-xs font-bold shadow-md shadow-teacher-500/20 hover:bg-teacher-700 hover:shadow-lg transition-all flex flex-col items-center gap-1 group/btn overflow-hidden">
+                                                                            <span className="w-full truncate">{reservation[3]}</span>
+                                                                            <span className="text-[9px] font-normal opacity-70 truncate w-full group-hover/btn:opacity-100 block">{reservation[4] || "詳細"}</span>
                                                                         </button>
                                                                     ) : (
                                                                         <button onClick={() => setModal({ type: 'reserve', student: s[0], period: p.name })} className="w-full py-3 bg-white border-2 border-dashed border-slate-200 text-slate-400 rounded-lg text-xs font-bold hover:border-teacher-400 hover:text-teacher-600 hover:bg-teacher-50 transition-all flex justify-center items-center gap-1">
@@ -555,6 +567,36 @@
                             </div>
                         )}
                     </main>
+
+                    {/* 学生登録の確認モーダル */}
+                    {confirmStudentReg && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setConfirmStudentReg(null)}></div>
+                            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
+                                <div className="p-6 bg-student-500 text-white flex justify-between items-start">
+                                    <h3 className="text-xl font-bold flex items-center gap-2"><Icon name="help-circle" /> 登録内容の確認</h3>
+                                </div>
+                                <div className="p-6 space-y-5">
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-xs font-bold text-slate-500 mb-1">氏名</p>
+                                        <p className="font-bold text-slate-800 text-lg mb-3">{confirmStudentReg.name} 様</p>
+                                        <p className="text-xs font-bold text-slate-500 mb-1">活動日と時間帯</p>
+                                        <p className="font-bold text-slate-800 font-mono text-base">{confirmStudentReg.date}</p>
+                                        <p className="font-bold text-slate-800 font-mono text-xl">{confirmStudentReg.start} 〜 {confirmStudentReg.end}</p>
+                                    </div>
+                                    <p className="text-sm text-slate-600 font-medium text-center">この内容で送信してよろしいですか？</p>
+                                    <div className="flex gap-3 pt-2">
+                                        <button type="button" onClick={() => setConfirmStudentReg(null)} className="flex-1 py-3.5 font-bold text-slate-500 bg-slate-100 rounded-xl hover:bg-slate-200 transition">修正する</button>
+                                        <button type="button" onClick={() => {
+                                            handlePost(confirmStudentReg);
+                                            if(studentFormRef.current) studentFormRef.current.reset();
+                                            setConfirmStudentReg(null);
+                                        }} className="flex-1 bg-student-500 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-student-500/30 hover:bg-student-600 hover:-translate-y-0.5 transition-all">送信する</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {passwordModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
