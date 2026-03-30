@@ -334,7 +334,6 @@
             const renderMatrix = (isTeacher) => {
                 const themeBg500 = isTeacher ? 'bg-teacher-500' : 'bg-student-500';
                 const themeBg600 = isTeacher ? 'bg-teacher-600' : 'bg-student-600';
-                const themeBg200 = isTeacher ? 'bg-teacher-200' : 'bg-student-200';
                 
                 return (
                     <section className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden animate-fade-in">
@@ -349,20 +348,23 @@
                             <table className="w-full text-sm border-collapse min-w-max">
                                 <thead>
                                     <tr>
-                                        <th className="p-4 text-left font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-40 shadow-[1px_1px_0_#e2e8f0]">
-                                            校時 / 時間
+                                        {/* ★左端の校時・時間の幅をコンパクトに修正 */}
+                                        <th className="p-2 text-center font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-20 md:w-24 shadow-[1px_1px_0_#e2e8f0] text-xs leading-tight">
+                                            校時<br/><span className="text-[10px]">時間</span>
                                         </th>
                                         {activeStudents.length === 0 ? <th className="p-4 text-slate-400 font-normal sticky-top bg-slate-50 border-b border-slate-200 shadow-[0_1px_0_#e2e8f0]">該当する先生がいません</th> :
                                             activeStudents.map((s, i) => (
-                                                <th key={i} className="p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
-                                                    <div className="flex items-center justify-center gap-1.5 mb-1 text-sm group/name relative">
-                                                        <Icon name="user" size={14} className="text-slate-400"/> {s[0]}
-                                                        {/* 教員のみ欠席ボタンを表示 */}
-                                                        {isTeacher && (
-                                                            <button onClick={() => setConfirmAbsent(s[0])} className="absolute right-0 text-slate-300 hover:text-red-500 transition-colors p-1" title="この先生を欠席にする">
-                                                                <Icon name="user-minus" size={14} />
-                                                            </button>
-                                                        )}
+                                                <th key={i} className="p-2 md:p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
+                                                    {/* ★先生の名前部分をタップして削除できるように修正 */}
+                                                    <div 
+                                                        className={`flex flex-col items-center justify-center mb-1 text-sm group/name relative ${isTeacher ? 'cursor-pointer hover:bg-red-50 rounded py-1 transition-colors' : ''}`}
+                                                        onClick={() => isTeacher && setConfirmAbsent(s[0])}
+                                                        title={isTeacher ? "タップしてこの先生を欠席にする" : ""}
+                                                    >
+                                                        <div className={`flex items-center gap-1.5 font-bold ${isTeacher ? 'group-hover/name:text-red-600' : ''}`}>
+                                                            <Icon name={isTeacher ? "user-minus" : "user"} size={14} className={isTeacher ? "text-slate-400 group-hover/name:text-red-500" : "text-slate-400"}/> 
+                                                            {s[0]}
+                                                        </div>
                                                     </div>
                                                     <div className="inline-block px-2 py-0.5 bg-white rounded text-[10px] text-slate-500 border border-slate-200 font-mono">
                                                         {displayTime(s[3])}~{displayTime(s[4])}
@@ -375,12 +377,12 @@
                                 <tbody>
                                     {activePeriods.map((p, idx) => (
                                         <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
-                                            <td className="p-4 sticky-left border-b border-r border-slate-100 group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_#f1f5f9]">
-                                                <div className="font-bold text-slate-700 flex items-center gap-2">
-                                                    <span className={`w-1 h-4 ${themeBg200} rounded-full`}></span>
-                                                    {p.name}
+                                            {/* ★左端データセルの幅をコンパクトに修正 */}
+                                            <td className="p-2 sticky-left border-b border-r border-slate-100 group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_#f1f5f9] w-20 md:w-24 bg-white">
+                                                <div className="font-bold text-slate-700 flex flex-col items-center justify-center text-xs text-center h-full">
+                                                    <span className="leading-tight">{p.name}</span>
+                                                    <span className="text-[9px] text-slate-400 font-mono mt-1">{p.start}-{p.end}</span>
                                                 </div>
-                                                <div className="text-[11px] text-slate-400 font-mono mt-1 ml-3">{p.start} - {p.end}</div>
                                             </td>
                                             {activeStudents.map((s, sIdx) => {
                                                 const isAvailable = isPeriodAvailable({ start: s[3], end: s[4] }, p);
@@ -459,10 +461,10 @@
                         </div>
                     </header>
 
-                    {/* アラートメッセージ */}
+                    {/* ★通知メッセージの表示位置と配置を修正 */}
                     {msg && (
-                        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] w-full max-w-md px-4 animate-slide-down pointer-events-none">
-                            <div className={`flex items-center justify-center gap-3 p-4 rounded-2xl shadow-xl border ${msg.type === 'error' ? 'bg-red-50 text-red-800 border-red-200' : `bg-${theme}-600 text-white border-${theme}-500`}`}>
+                        <div className="fixed top-6 left-0 right-0 z-[100] flex justify-center px-4 pointer-events-none">
+                            <div className={`animate-slide-down flex items-center justify-center gap-3 p-4 rounded-2xl shadow-xl border w-full max-w-sm ${msg.type === 'error' ? 'bg-red-50 text-red-800 border-red-200' : `bg-${theme}-600 text-white border-${theme}-500`}`}>
                                 <Icon name={msg.type === 'error' ? 'alert-circle' : 'check-circle'} size={20} />
                                 <span className="font-bold text-sm">{msg.text}</span>
                             </div>
@@ -555,7 +557,7 @@
                                     </form>
                                 </section>
                                 
-                                {/* ★ 共通化されたマトリクス呼び出し（学生用 = false） */}
+                                {/* 共通化されたマトリクス呼び出し（学生用 = false） */}
                                 {renderMatrix(false)}
                             </div>
                         ) : (
@@ -606,7 +608,7 @@
                                     </div>
                                 </section>
 
-                                {/* ★ 共通化されたマトリクス呼び出し（教員用 = true） */}
+                                {/* 共通化されたマトリクス呼び出し（教員用 = true） */}
                                 {renderMatrix(true)}
                             </div>
                         )}
