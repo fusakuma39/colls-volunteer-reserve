@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -42,14 +43,22 @@
         .animate-slide-down { animation: slideDown 0.3s ease-out forwards; }
         .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
         
-        /* input type="time" のデザイン調整 */
-        input[type="time"]::-webkit-calendar-picker-indicator {
-            cursor: pointer;
-            opacity: 0.6;
-            transition: 0.2s;
-        }
-        input[type="time"]::-webkit-calendar-picker-indicator:hover {
-            opacity: 1;
+        input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; transition: 0.2s; }
+        input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+        /* ================================
+           ★ 印刷（PDF保存）専用のスタイル
+           ================================ */
+        @media print {
+            @page { 
+                size: A4 portrait; /* A4縦向きに指定 */
+                margin: 15mm; 
+            }
+            body { 
+                background-color: #ffffff !important; 
+                -webkit-print-color-adjust: exact; /* 背景色を印刷に反映 */
+                print-color-adjust: exact; 
+            }
         }
     </style>
 </head>
@@ -128,12 +137,10 @@
             return <span ref={elRef} className="inline-flex items-center justify-center" />;
         };
 
-        // --- ユーティリティ関数 ---
         const checkDateMatch = (sheetDate, targetDateStr) => {
             if (!sheetDate) return false;
             const str = String(sheetDate);
             if (str.includes(targetDateStr)) return true;
-            
             const d = new Date(str);
             if (!isNaN(d.getTime())) {
                 const y = d.getFullYear();
@@ -179,19 +186,18 @@
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
             const [modal, setModal] = useState(null);
             const [msg, setMsg] = useState(null); 
+            const [studentFilter, setStudentFilter] = useState("");
             
             const [passwordModal, setPasswordModal] = useState(false);
             const [passwordError, setPasswordError] = useState("");
             
             const [confirmStudentReg, setConfirmStudentReg] = useState(null);
-            const [confirmAbsent, setConfirmAbsent] = useState(null); // ボランティア欠席用モーダル
-            const [holidays, setHolidays] = useState({}); // 祝日データ
+            const [confirmAbsent, setConfirmAbsent] = useState(null); 
+            const [holidays, setHolidays] = useState({}); 
             
             const studentFormRef = useRef(null);
-
             const theme = view === 'student' ? 'student' : 'teacher';
 
-            // 祝日データの取得
             useEffect(() => {
                 fetch('https://holidays-jp.github.io/api/v1/date.json')
                     .then(res => res.json())
@@ -199,7 +205,6 @@
                     .catch(e => console.error("祝日取得エラー", e));
             }, []);
 
-            // データの取得
             const fetchData = async () => {
                 if (!API_URL) return;
                 setLoading(true);
@@ -214,7 +219,6 @@
                 setLoading(false);
             };
 
-            // 初期読み込み
             useEffect(() => { fetchData(); }, []);
 
             const showMsg = (text, type = "success") => {
@@ -238,38 +242,26 @@
                 const isHoliday = holidays[dateStr] !== undefined;
                 
                 let patternName = manual ? manual[1] : null;
-                
                 if (!patternName) {
-                    // 土日祝は自動で「休み」
-                    if (day === 0 || day === 6 || isHoliday) {
-                        patternName = "休み";
-                    } else {
-                        patternName = "通常日課";
-                    }
+                    if (day === 0 || day === 6 || isHoliday) patternName = "休み";
+                    else patternName = "通常日課";
                 }
-
-                if (patternName === "休み") return []; // 休みの場合は枠なし
-
+                if (patternName === "休み") return [];
                 if (patternName !== "通常日課") return TIMETABLE_PATTERNS[patternName] || [];
 
                 const base = TIMETABLE_PATTERNS["通常日課"];
                 let periods = [base.morning, ...base.periods];
-                if ([1, 2, 4].includes(day)) {
-                    periods = periods.concat(base.afternoon_long);
-                } else {
-                    periods = periods.concat(base.afternoon_short);
-                }
+                if ([1, 2, 4].includes(day)) periods = periods.concat(base.afternoon_long);
+                else periods = periods.concat(base.afternoon_short);
                 return periods;
             };
 
             const activePeriods = useMemo(() => getDailyPeriods(selectedDate), [selectedDate, data.schedules, holidays]);
             
             const activeStudents = useMemo(() => {
-                // その日に「ABSENT（欠席）」として登録された学生の名前リストを取得
                 const absentStudentNames = data.reservations
                     .filter(r => checkDateMatch(r[0], selectedDate) && r[1] === 'ABSENT' && r[3] === 'ABSENT')
                     .map(r => r[2]);
-
                 return data.students.filter(s => 
                     checkDateMatch(s[2], selectedDate) && !absentStudentNames.includes(s[0])
                 );
@@ -281,7 +273,6 @@
                     return;
                 }
                 
-                // 楽観的UI更新（画面のパカパカを防ぐ）
                 const previousData = { ...data };
                 setData(prevData => {
                     let newData = { 
@@ -293,14 +284,11 @@
                     if (payload.type === 'reg_student') {
                         newData.students.push([payload.name, payload.email, payload.date, payload.start, payload.end]);
                     } else if (payload.type === 'reserve') {
-                        // 上書き・削除のために同じ枠・同じ人の予約を消す
                         newData.reservations = newData.reservations.filter(r => !(checkDateMatch(r[0], payload.date) && r[1] === payload.periodName && r[2] === payload.studentName));
-                        // 予約キャンセルでなければ追加
                         if (payload.className !== 'CANCELLED') {
                             newData.reservations.push([payload.date, payload.periodName, payload.studentName, payload.className, payload.note]);
                         }
                     } else if (payload.type === 'set_schedule') {
-                        // 古い設定を消して新しいものを追加
                         newData.schedules = newData.schedules.filter(s => !checkDateMatch(s[0], payload.date));
                         newData.schedules.push([payload.date, payload.pattern]);
                     }
@@ -311,15 +299,10 @@
                 setConfirmAbsent(null);
                 setConfirmStudentReg(null);
                 
-                if (payload.className === 'CANCELLED') {
-                    showMsg("予約を取り消しました");
-                } else if (payload.className === 'ABSENT') {
-                    showMsg("先生を欠席にしました");
-                } else {
-                    showMsg("送信しました！");
-                }
+                if (payload.className === 'CANCELLED') showMsg("予約を取り消しました");
+                else if (payload.className === 'ABSENT') showMsg("先生を欠席にしました");
+                else showMsg("送信しました！");
 
-                // 画面をズレさせないため、ここでは fetchDataInBackground() を呼ばない
                 try {
                     await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
                 } catch (e) {
@@ -328,45 +311,85 @@
                 }
             };
 
+            const selectedDayOfWeek = new Date(selectedDate).getDay();
+            const dayOfWeekStrs = ['日', '月', '火', '水', '木', '金', '土'];
+            const isHol = holidays[selectedDate] !== undefined;
+            const dayColorClass = (selectedDayOfWeek === 0 || isHol) ? 'bg-red-100 text-red-600' : selectedDayOfWeek === 6 ? 'bg-blue-100 text-blue-600' : 'border-slate-200 bg-white text-slate-700';
+
+            // ★ 日付のフォーマット作成（タイトル・PDF保存用）
+            const formattedDateForTitle = `${new Date(selectedDate).getFullYear()}年${new Date(selectedDate).getMonth() + 1}月${new Date(selectedDate).getDate()}日(${dayOfWeekStrs[selectedDayOfWeek]})`;
+
             // ==========================================
-            // ★ 超短縮！学生・教員 共通のマトリクス描画機能
+            // ★ マトリクス描画関数
             // ==========================================
             const renderMatrix = (isTeacher) => {
                 const themeBg500 = isTeacher ? 'bg-teacher-500' : 'bg-student-500';
                 const themeBg600 = isTeacher ? 'bg-teacher-600' : 'bg-student-600';
+                const themeBg200 = isTeacher ? 'bg-teacher-200' : 'bg-student-200';
+                const themeFocusBorder = isTeacher ? 'focus:border-teacher-400' : 'focus:border-student-400';
+                const themeFocusRing = isTeacher ? 'focus:ring-teacher-400/20' : 'focus:ring-student-400/20';
                 
+                const displayStudents = activeStudents.filter(s => s[0].includes(studentFilter));
+
                 return (
-                    <section className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden animate-fade-in">
-                        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2"><Icon name="table" size={18}/> 予約状況 {isTeacher ? "" : "(閲覧のみ)"}</h3>
-                            <div className="text-xs font-medium text-slate-500 flex gap-4">
-                                <span className="flex items-center gap-1"><span className={`w-3 h-3 rounded ${themeBg500}`}></span> 予約済</span>
-                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-dashed border-slate-300"></span> 空き枠</span>
+                    <section className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden animate-fade-in print:shadow-none print:border-none print:m-0 print:p-0">
+                        {/* マトリクス ヘッダー部分 */}
+                        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 print:bg-white print:border-none print:px-0 print:py-2">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full gap-4">
+                                {/* ★ タイトルに日付を表示 */}
+                                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                                    <Icon name="calendar-check" size={20} className="print:hidden text-slate-500"/> 
+                                    <span className="hidden print:inline mr-1 text-slate-800"><Icon name="calendar" size={18} /></span>
+                                    {formattedDateForTitle} のシフト表
+                                </h3>
+                                
+                                <div className="flex items-center gap-4">
+                                    <div className="relative print:hidden">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                            <Icon name="search" size={14} />
+                                        </div>
+                                        <input 
+                                            type="text" 
+                                            placeholder="お名前で検索..." 
+                                            value={studentFilter}
+                                            onChange={(e) => setStudentFilter(e.target.value)}
+                                            className={`w-full sm:w-48 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm ${themeFocusBorder} focus:ring-2 ${themeFocusRing} outline-none transition`}
+                                        />
+                                    </div>
+                                    {/* ★ PDF保存（印刷）ボタン */}
+                                    <button 
+                                        onClick={() => window.print()} 
+                                        className="print:hidden flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-bold shadow-md transition-colors"
+                                    >
+                                        <Icon name="printer" size={16} /> PDF保存
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                        <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                            <table className="w-full text-sm border-collapse min-w-max">
+                        
+                        {/* マトリクス テーブル部分 */}
+                        {/* ★ 印刷時はスクロールバーを無効化して全体を印刷 */}
+                        <div className="overflow-x-auto max-h-[600px] overflow-y-auto print:overflow-visible print:max-h-none">
+                            <table className="w-full text-sm border-collapse min-w-max print:w-full">
                                 <thead>
                                     <tr>
-                                        {/* ★左端の校時・時間の幅をコンパクトに修正 */}
-                                        <th className="p-2 text-center font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-20 md:w-24 shadow-[1px_1px_0_#e2e8f0] text-xs leading-tight">
+                                        <th className="p-2 text-center font-bold text-slate-500 sticky-corner border-b border-r border-slate-200 w-20 md:w-24 shadow-[1px_1px_0_#e2e8f0] text-xs leading-tight print:shadow-none print:border-slate-300">
                                             校時<br/><span className="text-[10px]">時間</span>
                                         </th>
-                                        {activeStudents.length === 0 ? <th className="p-4 text-slate-400 font-normal sticky-top bg-slate-50 border-b border-slate-200 shadow-[0_1px_0_#e2e8f0]">該当する先生がいません</th> :
-                                            activeStudents.map((s, i) => (
-                                                <th key={i} className="p-2 md:p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0">
-                                                    {/* ★先生の名前部分をタップして削除できるように修正 */}
+                                        {displayStudents.length === 0 ? <th className="p-4 text-slate-400 font-normal sticky-top bg-slate-50 border-b border-slate-200 shadow-[0_1px_0_#e2e8f0] print:shadow-none print:border-slate-300">該当する先生がいません</th> :
+                                            displayStudents.map((s, i) => (
+                                                <th key={i} className="p-2 md:p-3 text-center min-w-[150px] max-w-[150px] w-[150px] font-bold text-slate-700 sticky-top bg-slate-50 border-b border-r border-slate-200 shadow-[0_1px_0_#e2e8f0] last:border-r-0 print:shadow-none print:bg-white print:border-slate-300">
                                                     <div 
-                                                        className={`flex flex-col items-center justify-center mb-1 text-sm group/name relative ${isTeacher ? 'cursor-pointer hover:bg-red-50 rounded py-1 transition-colors' : ''}`}
+                                                        className={`flex flex-col items-center justify-center mb-1 text-sm group/name relative ${isTeacher ? 'cursor-pointer hover:bg-red-50 rounded py-1 transition-colors print:hover:bg-transparent' : ''}`}
                                                         onClick={() => isTeacher && setConfirmAbsent(s[0])}
                                                         title={isTeacher ? "タップしてこの先生を欠席にする" : ""}
                                                     >
-                                                        <div className={`flex items-center gap-1.5 font-bold ${isTeacher ? 'group-hover/name:text-red-600' : ''}`}>
-                                                            <Icon name={isTeacher ? "user-minus" : "user"} size={14} className={isTeacher ? "text-slate-400 group-hover/name:text-red-500" : "text-slate-400"}/> 
+                                                        <div className={`flex items-center gap-1.5 font-bold ${isTeacher ? 'group-hover/name:text-red-600 print:text-slate-700' : ''}`}>
+                                                            <Icon name={isTeacher ? "user-minus" : "user"} size={14} className={isTeacher ? "text-slate-400 group-hover/name:text-red-500 print:hidden" : "text-slate-400 print:hidden"}/> 
                                                             {s[0]}
                                                         </div>
                                                     </div>
-                                                    <div className="inline-block px-2 py-0.5 bg-white rounded text-[10px] text-slate-500 border border-slate-200 font-mono">
+                                                    <div className="inline-block px-2 py-0.5 bg-white rounded text-[10px] text-slate-500 border border-slate-200 font-mono print:border-none print:p-0">
                                                         {displayTime(s[3])}~{displayTime(s[4])}
                                                     </div>
                                                 </th>
@@ -376,35 +399,35 @@
                                 </thead>
                                 <tbody>
                                     {activePeriods.map((p, idx) => (
-                                        <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
-                                            {/* ★左端データセルの幅をコンパクトに修正 */}
-                                            <td className="p-2 sticky-left border-b border-r border-slate-100 group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_#f1f5f9] w-20 md:w-24 bg-white">
+                                        <tr key={idx} className="group hover:bg-slate-50/50 transition-colors print:hover:bg-white">
+                                            <td className="p-2 sticky-left border-b border-r border-slate-100 group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_#f1f5f9] w-20 md:w-24 bg-white print:shadow-none print:border-slate-300 print:group-hover:bg-white">
                                                 <div className="font-bold text-slate-700 flex flex-col items-center justify-center text-xs text-center h-full">
                                                     <span className="leading-tight">{p.name}</span>
-                                                    <span className="text-[9px] text-slate-400 font-mono mt-1">{p.start}-{p.end}</span>
+                                                    <span className="text-[9px] text-slate-400 font-mono mt-1 print:text-slate-500">{p.start}-{p.end}</span>
                                                 </div>
                                             </td>
-                                            {activeStudents.map((s, sIdx) => {
+                                            {displayStudents.map((s, sIdx) => {
                                                 const isAvailable = isPeriodAvailable({ start: s[3], end: s[4] }, p);
                                                 const reservation = data.reservations.find(r => checkDateMatch(r[0], selectedDate) && r[1] === p.name && r[2] === s[0] && r[3] !== 'CANCELLED');
                                                 return (
-                                                    <td key={sIdx} className="p-2.5 text-center border-b border-r border-slate-100 last:border-r-0 min-w-[150px] max-w-[150px] w-[150px]">
+                                                    <td key={sIdx} className="p-2.5 text-center border-b border-r border-slate-100 last:border-r-0 min-w-[150px] max-w-[150px] w-[150px] print:border-slate-300">
                                                         {!isAvailable ? 
-                                                            <div className="bg-slate-50 text-slate-300 text-[10px] py-3 rounded-lg flex justify-center items-center h-full"><Icon name="minus" size={16}/></div> 
+                                                            <div className="bg-slate-50 text-slate-300 text-[10px] py-3 rounded-lg flex justify-center items-center h-full print:bg-slate-100 print:border print:border-slate-200"><Icon name="minus" size={16} className="print:hidden"/></div> 
                                                         : reservation ? (
-                                                            // 教員ならクリック可能、学生なら閲覧のみ
+                                                            // 印刷時も予約枠は色付きで表示される
                                                             <button 
                                                                 onClick={() => isTeacher && setModal({ type: 'reserve', student: s[0], period: p.name, data: reservation })} 
-                                                                className={`w-full py-2.5 px-2 ${themeBg600} text-white rounded-lg text-xs font-bold shadow-md transition-all flex flex-col items-center gap-1 overflow-hidden ${isTeacher ? 'hover:opacity-90 hover:shadow-lg group/btn cursor-pointer' : 'cursor-default opacity-90'}`}
+                                                                className={`w-full py-2.5 px-2 ${themeBg600} text-white rounded-lg text-xs font-bold shadow-md transition-all flex flex-col items-center gap-1 overflow-hidden print:shadow-none print:border print:border-slate-800 print:text-black ${isTeacher ? 'hover:opacity-90 hover:shadow-lg group/btn cursor-pointer' : 'cursor-default opacity-90'}`}
+                                                                style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} // 強制的に背景色を印刷
                                                             >
-                                                                <span className="w-full truncate">{reservation[3]}</span>
-                                                                <span className={`text-[9px] font-normal truncate w-full block ${isTeacher ? 'opacity-70 group-hover/btn:opacity-100' : 'opacity-80'}`}>{reservation[4] || "詳細"}</span>
+                                                                <span className="w-full truncate print:whitespace-normal">{reservation[3]}</span>
+                                                                <span className={`text-[9px] font-normal truncate w-full block print:whitespace-normal ${isTeacher ? 'opacity-70 group-hover/btn:opacity-100' : 'opacity-80'}`}>{reservation[4] || "詳細"}</span>
                                                             </button>
                                                         ) : (
-                                                            // 教員ならクリック可能、学生なら閲覧のみ
+                                                            // ★ 印刷時は「空き」ボタンを非表示にし、手書き用の空白スペースにする
                                                             <button 
                                                                 onClick={() => isTeacher && setModal({ type: 'reserve', student: s[0], period: p.name })} 
-                                                                className={`w-full py-3 bg-white border-2 border-dashed border-slate-200 text-slate-400 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${isTeacher ? 'hover:border-teacher-400 hover:text-teacher-600 hover:bg-teacher-50 cursor-pointer' : 'cursor-default opacity-70'}`}
+                                                                className={`w-full py-3 bg-white border-2 border-dashed border-slate-200 text-slate-400 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all print:hidden ${isTeacher ? 'hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer' : 'cursor-default opacity-70'}`}
                                                             >
                                                                 {isTeacher && <Icon name="plus" size={14} />} 空き
                                                             </button>
@@ -421,15 +444,10 @@
                 );
             };
 
-            const selectedDayOfWeek = new Date(selectedDate).getDay();
-            const dayOfWeekStrs = ['日', '月', '火', '水', '木', '金', '土'];
-            const isHol = holidays[selectedDate] !== undefined;
-            const dayColorClass = (selectedDayOfWeek === 0 || isHol) ? 'bg-red-100 text-red-600' : selectedDayOfWeek === 6 ? 'bg-blue-100 text-blue-600' : 'border-slate-200 bg-white text-slate-700';
-
             return (
-                <div className="min-h-screen pb-12">
-                    {/* Header */}
-                    <header className={`bg-white border-b border-slate-200 sticky top-0 z-40 transition-colors duration-300 shadow-sm`}>
+                <div className="min-h-screen pb-12 print:pb-0 print:bg-white">
+                    {/* Header (印刷時非表示) */}
+                    <header className={`bg-white border-b border-slate-200 sticky top-0 z-40 transition-colors duration-300 shadow-sm print:hidden`}>
                         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <div className={`p-1.5 rounded-lg ${view === 'student' ? 'bg-student-500' : 'bg-teacher-500'} text-white transition-colors`}>
@@ -441,29 +459,19 @@
                             </div>
                             
                             <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200/60">
-                                <button 
-                                    onClick={() => setView('student')} 
-                                    className={`relative px-4 sm:px-6 py-1.5 text-sm font-bold rounded-lg transition-all duration-200 ${view === 'student' ? 'text-student-600 bg-white shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
+                                <button onClick={() => setView('student')} className={`relative px-4 sm:px-6 py-1.5 text-sm font-bold rounded-lg transition-all duration-200 ${view === 'student' ? 'text-student-600 bg-white shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'}`}>
                                     学生用
                                 </button>
-                                <button 
-                                    onClick={() => {
-                                        if (view !== 'teacher') setPasswordModal(true);
-                                    }} 
-                                    className={`relative px-4 sm:px-6 py-1.5 text-sm font-bold rounded-lg transition-all duration-200 ${view === 'teacher' ? 'text-teacher-600 bg-white shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <span className="flex items-center gap-1">
-                                        教員用 {view !== 'teacher' && <Icon name="lock" size={14} className="opacity-50" />}
-                                    </span>
+                                <button onClick={() => { if (view !== 'teacher') setPasswordModal(true); }} className={`relative px-4 sm:px-6 py-1.5 text-sm font-bold rounded-lg transition-all duration-200 ${view === 'teacher' ? 'text-teacher-600 bg-white shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'}`}>
+                                    <span className="flex items-center gap-1">教員用 {view !== 'teacher' && <Icon name="lock" size={14} className="opacity-50" />}</span>
                                 </button>
                             </div>
                         </div>
                     </header>
 
-                    {/* ★通知メッセージの表示位置と配置を修正 */}
+                    {/* メッセージ (印刷時非表示) */}
                     {msg && (
-                        <div className="fixed top-6 left-0 right-0 z-[100] flex justify-center px-4 pointer-events-none">
+                        <div className="fixed top-6 left-0 right-0 z-[100] flex justify-center px-4 pointer-events-none print:hidden">
                             <div className={`animate-slide-down flex items-center justify-center gap-3 p-4 rounded-2xl shadow-xl border w-full max-w-sm ${msg.type === 'error' ? 'bg-red-50 text-red-800 border-red-200' : `bg-${theme}-600 text-white border-${theme}-500`}`}>
                                 <Icon name={msg.type === 'error' ? 'alert-circle' : 'check-circle'} size={20} />
                                 <span className="font-bold text-sm">{msg.text}</span>
@@ -471,10 +479,10 @@
                         </div>
                     )}
 
-                    <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8 animate-fade-in">
+                    <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8 animate-fade-in print:px-0 print:mt-0 print:space-y-4">
                         
-                        {/* 日付・更新 セクション */}
-                        <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center gap-6 justify-between relative overflow-hidden">
+                        {/* 日付・更新 セクション (印刷時非表示) */}
+                        <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center gap-6 justify-between relative overflow-hidden print:hidden">
                             <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${view === 'student' ? 'bg-student-500' : 'bg-teacher-500'}`}></div>
                             <div className="pl-2 flex-1">
                                 <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-1">Activity Date</h2>
@@ -497,11 +505,7 @@
                                         {isHol ? holidays[selectedDate] : `${dayOfWeekStrs[selectedDayOfWeek]}曜日`}
                                     </span>
                                 </div>
-                                <button 
-                                    onClick={fetchData} 
-                                    disabled={loading}
-                                    className={`w-full sm:w-auto px-6 py-3.5 rounded-xl border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition shadow-md disabled:opacity-50 flex items-center justify-center gap-2 font-bold`}
-                                >
+                                <button onClick={fetchData} disabled={loading} className={`w-full sm:w-auto px-6 py-3.5 rounded-xl border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition shadow-md disabled:opacity-50 flex items-center justify-center gap-2 font-bold`}>
                                     <Icon name="refresh-cw" size={18} className={loading ? `animate-spin` : ""} />
                                     <span>最新データに更新</span>
                                 </button>
@@ -510,9 +514,8 @@
 
                         {/* 学生用画面 */}
                         {view === 'student' ? (
-                            <div className="space-y-8 animate-fade-in">
-                                {/* スマート化された登録フォーム */}
-                                <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+                            <div className="space-y-8 animate-fade-in print:space-y-4">
+                                <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 print:hidden">
                                     <div className="flex items-center gap-3 mb-8">
                                         <div className="bg-student-100 p-2 rounded-full text-student-600"><Icon name="clock" size={24} /></div>
                                         <h2 className="text-xl font-bold text-slate-800">勤務可能時間を登録</h2>
@@ -520,22 +523,13 @@
                                     <form ref={studentFormRef} onSubmit={(e) => {
                                         e.preventDefault();
                                         const fd = new FormData(e.target);
-                                        setConfirmStudentReg({
-                                            type: 'reg_student',
-                                            name: fd.get('name'),
-                                            email: "",
-                                            date: selectedDate,
-                                            start: fd.get('start'),
-                                            end: fd.get('end')
-                                        });
+                                        setConfirmStudentReg({ type: 'reg_student', name: fd.get('name'), email: "", date: selectedDate, start: fd.get('start'), end: fd.get('end') });
                                     }} className="space-y-6">
-                                        
                                         <div className="grid md:grid-cols-3 gap-6 items-start">
                                             <div className="space-y-2 md:col-span-1">
                                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="user" size={14}/> 氏名（名字のみでOK）</label>
                                                 <input name="name" required className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-student-500 focus:ring-4 focus:ring-student-500/10 transition outline-none" placeholder="例: 倉田" />
                                             </div>
-
                                             <div className="md:col-span-2 p-4 bg-slate-50 rounded-xl border border-slate-200">
                                                 <div className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-3"><Icon name="timer" size={16}/> 勤務可能な時間帯を選択</div>
                                                 <div className="flex items-center gap-4">
@@ -556,14 +550,12 @@
                                         </button>
                                     </form>
                                 </section>
-                                
-                                {/* 共通化されたマトリクス呼び出し（学生用 = false） */}
                                 {renderMatrix(false)}
                             </div>
                         ) : (
                             /* 教員用画面 */
-                            <div className="space-y-8 animate-fade-in">
-                                <section className="bg-teacher-50 p-6 rounded-2xl border border-teacher-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm">
+                            <div className="space-y-8 animate-fade-in print:space-y-4">
+                                <section className="bg-teacher-50 p-6 rounded-2xl border border-teacher-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm print:hidden">
                                     <div className="flex items-start gap-4">
                                         <div className="bg-white p-2.5 rounded-xl shadow-sm text-teacher-600 mt-1">
                                             <Icon name="settings-2" size={24} />
@@ -607,16 +599,14 @@
                                         })}
                                     </div>
                                 </section>
-
-                                {/* 共通化されたマトリクス呼び出し（教員用 = true） */}
                                 {renderMatrix(true)}
                             </div>
                         )}
                     </main>
 
-                    {/* 先生の欠席・削除確認モーダル */}
+                    {/* モーダル類 (印刷時非表示) */}
                     {confirmAbsent && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
                             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setConfirmAbsent(null)}></div>
                             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
                                 <div className="p-6 bg-red-500 text-white flex justify-between items-start">
@@ -639,9 +629,8 @@
                         </div>
                     )}
 
-                    {/* 学生登録の確認モーダル */}
                     {confirmStudentReg && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
                             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setConfirmStudentReg(null)}></div>
                             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
                                 <div className="p-6 bg-student-500 text-white flex justify-between items-start">
@@ -668,9 +657,8 @@
                         </div>
                     )}
 
-                    {/* 教員パスワードモーダル */}
                     {passwordModal && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
                             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => { setPasswordModal(false); setPasswordError(""); }}></div>
                             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
                                 <div className="p-6 bg-teacher-600 text-white flex justify-between items-start">
@@ -689,14 +677,7 @@
                                 }} className="p-6 space-y-5">
                                     <div className="space-y-2">
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><Icon name="key" size={14}/> パスワードを入力</label>
-                                        <input 
-                                            name="password" 
-                                            type="password" 
-                                            required 
-                                            autoFocus 
-                                            className="w-full p-4 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition font-bold text-slate-700 text-center tracking-[0.5em] text-lg" 
-                                            placeholder="****" 
-                                        />
+                                        <input name="password" type="password" required autoFocus className="w-full p-4 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-teacher-500 focus:ring-4 focus:ring-teacher-500/10 transition font-bold text-slate-700 text-center tracking-[0.5em] text-lg" placeholder="****" />
                                     </div>
                                     {passwordError && (
                                         <div className="text-red-500 text-xs font-bold text-center flex items-center justify-center gap-1 animate-pulse">
@@ -712,9 +693,8 @@
                         </div>
                     )}
 
-                    {/* 予約作成・編集モーダル */}
                     {modal && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
                             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setModal(null)}></div>
                             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-slide-down">
                                 <div className="p-6 bg-teacher-600 text-white flex justify-between items-start">
@@ -765,14 +745,6 @@
                             </div>
                         </div>
                     )}
-
-                    {/* 初回読み込み時のスピナー */}
-                    {loading && data.schedules.length === 0 && (
-                        <div className="fixed inset-0 bg-white/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center animate-fade-in">
-                            <div className="w-12 h-12 border-4 border-slate-200 border-t-teacher-600 rounded-full animate-spin shadow-lg"></div>
-                            <p className="mt-4 font-bold text-slate-600 tracking-widest text-sm animate-pulse">読み込み中...</p>
-                        </div>
-                    )}
                 </div>
             );
         }
@@ -782,3 +754,6 @@
     </script>
 </body>
 </html>
+
+
+```
